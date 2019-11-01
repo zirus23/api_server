@@ -7,192 +7,81 @@ import hashlib
 import datetime
 import contextlib
 import http.server
+from db_utils import Database
 
-conn = sqlite3.connect("challenge.db")
-
+# class to handle all requests
 class Handler(http.server.BaseHTTPRequestHandler):
-    def json_app_respond(self, code=400, message=""):
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        self.wfile.write(message.encode("UTF-8"))
-    
-    def check_authorization(self):
-        self.auth_user = None
-        has_auth = self.headers.get("Authorization")
-        if has_auth != None:
-            auth_type, token = has_auth.split()
-            if auth_type.lower() != "bearer": return
 
-            cursor = conn.cursor()
-            self.auth_user = cursor.execute("""SELECT u_id 
-                        FROM users WHERE auth_token=?;""", (token,)).fetchone()
-            if self.auth_user != None: 
-                self.auth_user = self.auth_user[0]
-
-        print("current user : ", self.auth_user)
-
+    # handle post requests
     def do_POST(self):
-        self.check_authorization()
-
         if self.path == "/check":
             self.handle_check()
         elif self.path == "/users":
-            self.handle_new_user()
+            self.handle_createUser()
         elif self.path == "/login":
             self.handle_login()
         elif self.path == "/messages":
-            self.handle_send_message()
+            self.handle_sendMessage()
         else:
-            self.json_app_respond(404, "URL not found\n")
+            self.simple_respond(404, f"URL not found: {self.path}")
 
         print("posted headers : ", self.headers)
-        
+
+    # handle get requests
     def do_GET(self):
-        self.check_authorization()
-        
         if (self.path[:9] == "/messages"):
             try:
-                self.handle_messages()
+                self.handle_getMessages()
             except:
-                pass
+                self.simple_respond(404, f"URL not found: {self.path}")
         else:
-            self.json_app_respond(404, "Invalid URL: %s" % self.path)
+            self.simple_respond(404, f"URL not found: {self.path}")
 
-    #NOTE: ASSUMING QUERY PARAMS PASSED LIKE /messages?recipient=0&start=1
-    def handle_messages(self):
-        #get sender id, recipient id and type of message
+    # handles query to get limit number of messages with ids starting at start
+    def handle_getMessages(self):
+        # extract params recipient, start and optionally limit
         params = self.path.split("?")[-1].split("&")
         params = dict([tuple(p.split("=")) for p in params])
         recipient = params["recipient"]
         start = params["start"]
-        if "limit" in params:
-            limit = params["limit"]
-        else:
-            limit = "100" #default
-
-        #only valid if the authorization token was obtained by recipient login
-        if int(recipient) != self.auth_user:
-            self.json_app_respond(400, 
-            "Authentication failed, incorrect token for recipient\n")
-            return
+        limit = params["limit"] if "limit" in params else "100"
         
-        cursor = conn.cursor()
-        messages = cursor.execute("""
-        SELECT * FROM messages WHERE recipient=? LIMIT ?, ?;
-        """, (recipient, start, limit)).fetchall()
+        # check if authorized to get recipient's messages
+        auth = self.headers.get("Authorization")
+        if self.server.db.authenticate(recipient, auth):
+            messages = self.server.db.get_messages(recipient, start, limit)
+            self.simple_respond(200, messages)
+        else:
+            self.simple_respond(400, "Authentication failed\n")
 
-        parsed = []
-        # parsing messages into correct format
-        for msg in messages:
-            # msg_id, sender, recipient, msg_type, 
-            # msg_text, img_height, img_width, url, vid_source, timestamp
-            if msg[3] == "text":
-                content = {
-                           "type": msg[3], 
-                           "text":msg[4]
-                           }
-            elif msg[3] == "image":
-                content = {
-                           "type": msg[3], 
-                           "url":msg[7], 
-                           "height":msg[5],
-                           "width":msg[6]
-                           }
-            else:
-                assert(msg[3] == "video")
-                content = {
-                           "type": msg[3], 
-                           "url":msg[7], 
-                           "source": msg[8]
-                           }
-            curr = {
-                    "id": msg[0],
-                    "timestamp": msg[9],
-                    "sender": msg[1],
-                    "recipient": msg[2],
-                    "content": content
-                   }
-            parsed += [curr]
-
-        self.json_app_respond(200, json.dumps({"messages": parsed}))
-
-    def handle_send_message(self):
+    # handles query to send message from sender to recipient
+    def handle_sendMessage(self):
         #get sender id, recipient id and type of message
         content_len = int(self.headers.get("content-length"))
         body = json.loads(self.rfile.read(content_len))
         sender = body["sender"]
-        recipient = body["recipient"]
-        msg_type = body["content"]["type"]
+        
+        # check if authenticated to send message from sender
+        auth = self.headers.get("Authorization")
+        if self.server.db.authenticate(sender, auth):
+            try:
+                response = self.server.db.add_message(body)
+                self.simple_respond(200, response)
 
-        #only allowed if sender is
-        if sender != self.auth_user:
-            self.json_app_respond(400, 
-            "Authentication failed, incorrect token for sender\n")
-            return
+            except Exception as type_error:
+                self.simple_respond(400, str(type_error))
 
-        cursor = conn.cursor()
-        msg_id = cursor.execute("SELECT COUNT(*) FROM messages;").fetchone()[0]
-
-        #get timestamp
-        now = datetime.datetime.utcnow()
-        timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        #NOTE: hardcoding here since writeup wanted, alternative is to just add
-        # a single content text field in data base and store json.dumps(content)
-        if msg_type == "text":
-            text = body["content"]["text"]
-
-            request = """
-            INSERT INTO messages(msg_id, sender, recipient, msg_type, 
-                                 msg_text, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?);
-            """
-            cursor.execute(request, (msg_id, sender, recipient, msg_type, 
-                                     text, timestamp))
-
-        elif msg_type == "image":
-            url = body["content"]["url"]
-            height = body["content"]["height"]
-            width = body["content"]["width"]
-            request = """
-            INSERT INTO messages(msg_id, sender, recipient, msg_type, 
-                                 url, img_height, img_width, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-            """
-            cursor.execute(request, (msg_id, sender, recipient, msg_type, 
-                                     url, height, width, timestamp))
-
-        elif msg_type == "video":
-            url = body["content"]["url"]
-            source = body["content"]["source"]
-            request = """
-            INSERT INTO messages(msg_id, sender, recipient, msg_type, 
-                                url, vid_source, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?);
-            """
-            cursor.execute(request, (msg_id, sender, recipient, msg_type,
-                                     url, source, timestamp))
         else:
-            self.json_app_respond(400, "Invalid message type\n")
-            return
-
-        #commit once every N messages
-        if msg_id % 20 == 0:
-            conn.commit()
-        #NOTE: Ideally we would store messages in a cache and insert in batches
-
-        #respond with message id and timestamp (zero hour offset)
-        message = json.dumps({"id":msg_id, "timestamp":timestamp})
-        self.json_app_respond(200, message)
+            self.simple_respond(400, 
+            "Authentication failed, incorrect token for sender\n")
 
     def handle_login(self):
         #get username and password
-        user, password = self.get_user()
+        user, password = self.parse_user()
 
         #generate token
-        token = hashlib.md5((password + "salt").encode("UTF-8"))
-        token = token.hexdigest()
+        pass_bytes = (password + "salt").encode()
+        token = hashlib.md5(pass_bytes).hexdigest()
 
         #check database for user
         cursor = conn.cursor()
@@ -202,97 +91,80 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # if valid user/pass combo, respond with u_id and token
         if check == None:
-            self.json_app_respond(400, "Invalid username/password")
+            self.simple_respond(400, "Invalid username/password")
         else:
             u_id, auth_token = check
             message = json.dumps({"id":u_id, "token":auth_token})
-            self.json_app_respond(200, message)
+            self.simple_respond(200, message)
 
-    def handle_new_user(self):
+    def handle_createUser(self):
         #get username and password
-        user, password = self.get_user()
+        user, password = self.parse_user()
 
         #generate auth token (normally would use a random salt like os.urandom)
         token = hashlib.md5((password + "salt").encode("UTF-8"))
         token = token.hexdigest()
 
         #add user and auth token to database
-        cursor = conn.cursor()
-        u_id = cursor.execute("SELECT COUNT(*) FROM users;").fetchone()[0]
-        request = "INSERT INTO users VALUES (?, ?, ?);"
         try:
-            cursor.execute(request, (u_id, user, token))
+            u_id = self.server.db.add_user(user, token)
         except:
-            self.json_app_respond(400, "User already exists\n")
+            self.simple_respond(400, "User already exists\n")
             return
 
-        #commit new user to database immediately
-        conn.commit()
+        # commit to database with each user for ease of testing
+        # on a real server we would instead add the user to a cache and update
+        # the database in batches
+        self.server.db.commit()
 
         #response of form {"id":id_num}
-        message = json.dumps({"id": u_id})
-        self.json_app_respond(200, message)
+        response = json.dumps({"id": u_id})
+        self.simple_respond(200, response)
 
-    def get_user(self):
-        #get message body
+    # handle request to check server health
+    def handle_check(self):
+        if self.server.db.query_health() == 1:
+            self.simple_respond(200, json.dumps({"health": "ok"}))
+
+        self.simple_respond(400, json.dumps({"health": "bad: data corrupted"}))
+
+    # parses post body to extract username and password
+    def parse_user(self):
         content_len = int(self.headers.get("content-length"))
         body = json.loads(self.rfile.read(content_len))
         return body["username"], body["password"]
 
-    def handle_check(self):
-        if self.query_health() != 1:
-            raise Exception('unexpected query result')
-        self.json_app_respond(200, json.dumps({"health": "ok"}))
+    # helper to easily respond with frequently used headers
+    def simple_respond(self, code=200, response=""):
+        # indicates success (200) or type of failure (eg. 404)
+        self.send_response(code)
 
-    def query_health(self):
-        with contextlib.closing(self.server.conn.cursor()) as cur:
-            cur.execute('SELECT 1')
-            (res, ) = cur.fetchone()
-            return res
+        #if success, send json application else send plaintext error
+        if (code == 200):
+            self.send_header('Content-Type', 'application/json')
+        else:
+            self.send_header('Content-Type', 'text/plain')
+        self.end_headers()
 
+        # send the body
+        self.wfile.write(response.encode("UTF-8"))
+
+# server class
 class Server(http.server.HTTPServer):
     def __init__(self, address, conn):
         super().__init__(address, Handler)
         self.conn = conn
-        self.specs = json.loads(open("swagger.json","r").read())
-        self.init_database()
-    
-    def init_database(self):
-        cursor = self.conn.cursor()
-        
-        # table of u_id, username and auth_token
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-        u_id INTEGER PRIMARY_KEY,
-        username TEXT NOT NULL UNIQUE,
-        auth_token TEXT NOT NULL
-        );
-        """)
-        
-        # table of messages with sender and receiver info
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-        msg_id INTEGER PRIMARY_KEY,
-        sender INTEGER NOT NULL,
-        recipient INTEGER NOT NULL,
-        msg_type TEXT NOT NULL,
-        msg_text TEXT,
-        img_height INTEGER,
-        img_width INTEGER,
-        url TEXT,
-        vid_source TEXT,
-        timestamp TEXT NOT NULL
-        );
-        """)
-        #NOTE: Ideally, we would update this table in batches instead
-        # of with message received
+        self.db = Database(conn)
 
+# main function
 def main():
+    # instantiate database
     conn = sqlite3.connect('challenge.db')
+
+    # intialize the server class and serve forever
     address = ('localhost', 8080)
     httpd = Server(address, conn)
     httpd.serve_forever()
-    conn.close() #kinda useless here but i dont like not having this
 
 if __name__ == '__main__':
     main()
