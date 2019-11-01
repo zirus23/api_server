@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
 
+"""
+This file implements a basic http server as defined by the openAPI
+specification swagger.json. It can be run with a simple
+$ python3 challenge.py
+This file needs to be in the same directory as db_utils.py to run
+properly. A local database "challenge.db" will be created if doesn't
+exist. If crashed, the database will still have information up until
+the last commit. The commit frequency can be defined in the db_utils.py
+file.
+"""
+
 import os
 import json
 import sqlite3
@@ -25,8 +36,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             self.simple_respond(404, f"URL not found: {self.path}")
 
-        print("posted headers : ", self.headers)
-
     # handle get requests
     def do_GET(self):
         if (self.path[:9] == "/messages"):
@@ -37,29 +46,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             self.simple_respond(404, f"URL not found: {self.path}")
 
-    # handles query to get limit number of messages with ids starting at start
-    def handle_getMessages(self):
-        # extract params recipient, start and optionally limit
-        params = self.path.split("?")[-1].split("&")
-        params = dict([tuple(p.split("=")) for p in params])
-        recipient = params["recipient"]
-        start = params["start"]
-        limit = params["limit"] if "limit" in params else "100"
-        
-        # check if authorized to get recipient's messages
-        auth = self.headers.get("Authorization")
-        if self.server.db.authenticate(recipient, auth):
-            messages = self.server.db.get_messages(recipient, start, limit)
-            self.simple_respond(200, messages)
-        else:
-            self.simple_respond(400, "Authentication failed\n")
-
+    # handle request to check server health
+    def handle_check(self):
+        if self.server.db.query_health() == 1:
+            self.simple_respond(200, json.dumps({"health": "ok"}))
+            return
+        # else the database is corrupted
+        self.simple_respond(400, json.dumps({"health": "bad: data corrupted"}))
+    
     # handles query to send message from sender to recipient
     def handle_sendMessage(self):
         #get sender id, recipient id and type of message
-        content_len = int(self.headers.get("content-length"))
-        body = json.loads(self.rfile.read(content_len))
-        sender = body["sender"]
+        try:
+            body = self.get_body()
+            sender = body["sender"]
+        except:
+            self.simple_respond(400, "Invalid body json formatting\n")
+            return
         
         # check if authenticated to send message from sender
         auth = self.headers.get("Authorization")
@@ -77,17 +80,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def handle_login(self):
         #get username and password
-        user, password = self.parse_user()
+        try:
+            user, password = self.parse_user()
+        except:
+            self.simple_respond(400, "Invalid json formatting\n")
+            return
 
-        #generate token
-        pass_bytes = (password + "salt").encode()
+        # generate token
+        pass_bytes = (password + "salt").encode("UTF-8")
         token = hashlib.md5(pass_bytes).hexdigest()
 
-        #check database for user
-        cursor = conn.cursor()
-        check = cursor.execute("""
-                SELECT u_id, auth_token FROM users where username=? 
-                AND auth_token=?;""", (user, token)).fetchone()
+        # check if user, token combo in database
+        check = self.server.db.user_lookup(user, token)
 
         # if valid user/pass combo, respond with u_id and token
         if check == None:
@@ -98,14 +102,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.simple_respond(200, message)
 
     def handle_createUser(self):
-        #get username and password
-        user, password = self.parse_user()
+        # get username and password
+        try:
+            user, password = self.parse_user()
+        except:
+            self.simple_respond(400, "Invalid json formatting\n")
+            return
 
-        #generate auth token (normally would use a random salt like os.urandom)
+        # generate auth token
+        # using a slower hash like bcrypt is better and harder to decode
+        # the salt should fixed for a given database but chosen randomly
         token = hashlib.md5((password + "salt").encode("UTF-8"))
         token = token.hexdigest()
 
-        #add user and auth token to database
+        # add user and auth token to database
         try:
             u_id = self.server.db.add_user(user, token)
         except:
@@ -121,17 +131,41 @@ class Handler(http.server.BaseHTTPRequestHandler):
         response = json.dumps({"id": u_id})
         self.simple_respond(200, response)
 
-    # handle request to check server health
-    def handle_check(self):
-        if self.server.db.query_health() == 1:
-            self.simple_respond(200, json.dumps({"health": "ok"}))
+    # handles query to get limit number of messages with ids starting at start
+    def handle_getMessages(self):
+        # extract params recipient, start and optionally limit
+        try:
+            params = self.extract_query_params()
+            start, recipient, limit = params
+        except:
+            self.simple_respond(400, "Invalid query formatting\n")
+            return
+        
+        # check if authorized to get recipient's messages
+        auth = self.headers.get("Authorization")
+        if self.server.db.authenticate(recipient, auth):
+            messages = self.server.db.get_messages(recipient, start, limit)
+            self.simple_respond(200, messages)
+        else:
+            self.simple_respond(400, "Authentication failed\n")
 
-        self.simple_respond(400, json.dumps({"health": "bad: data corrupted"}))
+
+    #########################################################
+    ### ALL FUNCTIONS AFTER HERE ARE HELPERS FOR HANDLERS ###
+    #########################################################
+
+    # extracts start, recipient and limit params from query url
+    def extract_query_params(self):
+        params = self.path.split("?")[-1].split("&")
+        params = dict([tuple(p.split("=")) for p in params])
+        recipient = params["recipient"]
+        start = params["start"]
+        limit = params["limit"] if "limit" in params else "100"
+        return start, recipient, limit
 
     # parses post body to extract username and password
     def parse_user(self):
-        content_len = int(self.headers.get("content-length"))
-        body = json.loads(self.rfile.read(content_len))
+        body = self.get_body()
         return body["username"], body["password"]
 
     # helper to easily respond with frequently used headers
@@ -148,6 +182,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # send the body
         self.wfile.write(response.encode("UTF-8"))
+
+    # extract body of a post request
+    def get_body(self):
+        content_len = int(self.headers.get("content-length"))
+        body = json.loads(self.rfile.read(content_len))
+        return body
 
 # server class
 class Server(http.server.HTTPServer):

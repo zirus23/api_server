@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
-import json
-import sqlite3
-import datetime
-from contextlib import closing
-
 """
 This file contains all functions that interact directly with the database
 and use SQL commands to do so.
 """
+
+import json
+import sqlite3
+import datetime
+from contextlib import closing
 
 # the database will commit once every N users and once every N messages
 # can modify this as per needs to prioritize operation speed or concurrency 
@@ -20,8 +20,6 @@ class Database():
     #initializes the database with a users and a message table
     def __init__(self, conn):
         self.conn = conn
-        self.user_count = 0
-        self.msg_count = 0
         cursor = self.conn.cursor()
         
         # Table of users
@@ -34,7 +32,10 @@ class Database():
         u_id INTEGER PRIMARY_KEY,
         username TEXT NOT NULL UNIQUE,
         auth_token TEXT NOT NULL
-        );
+        );""")
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS u_id_username_index
+        ON users (username, u_id);
         """)
 
         # Table of messages
@@ -59,6 +60,10 @@ class Database():
         timestamp TEXT NOT NULL
         );
         """)
+        
+        self.user_count = cursor.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        self.msg_count = cursor.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        
         cursor.close()
 
     # checks if authorization header valid for given user id
@@ -103,35 +108,35 @@ class Database():
         parsed_messages = []
         # parsing messages into correct format
         for msg in messages:
-            # msg_id, sender, recipient, msg_type, 
-            # msg_text, img_height, img_width, url, vid_source, timestamp
-            if msg[3] == "text":
+            msg_id, sender, recipient, msg_type, \
+            text, height, width, url, source, timestamp = msg
+            if msg_type == "text":
                 content = {
-                           "type": msg[3], 
-                           "text":msg[4]
+                           "type": msg_type, 
+                           "text": text
                            }
 
-            elif msg[3] == "image":
+            elif msg_type == "image":
                 content = {
-                           "type": msg[3], 
-                           "url":msg[7], 
-                           "height":msg[5],
-                           "width":msg[6]
+                           "type": msg_type, 
+                           "url": url, 
+                           "height": height,
+                           "width": width
                            }
 
             else:
-                assert(msg[3] == "video")
+                assert(msg_type == "video")
                 content = {
-                           "type": msg[3], 
-                           "url":msg[7], 
-                           "source": msg[8]
+                           "type": msg_type,
+                           "url": url,
+                           "source": source
                            }
 
             curr = {
-                    "id": msg[0],
-                    "timestamp": msg[9],
-                    "sender": msg[1],
-                    "recipient": msg[2],
+                    "id": msg_id,
+                    "timestamp": timestamp,
+                    "sender": sender,
+                    "recipient": recipient,
                     "content": content
                    }
 
@@ -194,7 +199,7 @@ class Database():
         self.msg_count += 1
         # commit is slow but nescassary for others seeing the database to be
         # able to see this data, so we only commit occasionally
-        if msg_count % commit_frequency == 0:
+        if self.msg_count % commit_frequency == 0:
             self.conn.commit()
         
         cursor.close()
@@ -209,7 +214,16 @@ class Database():
 
     # check if database is healthy
     def query_health(self):
-        with closing(self.server.conn.cursor()) as cur:
+        with closing(self.conn.cursor()) as cur:
             cur.execute('SELECT 1')
             (res, ) = cur.fetchone()
             return res
+
+    # check database for user
+    def user_lookup(self, user, token):
+        cursor = self.conn.cursor()
+        check = cursor.execute("""
+                SELECT u_id, auth_token FROM users where username=? 
+                AND auth_token=?;""", (user, token)).fetchone()
+        cursor.close()
+        return check
