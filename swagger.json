@@ -1,0 +1,407 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "ASAPP Challenge Project",
+    "version": "v1",
+    "description": "Download skeleton code: <a class=\"sc-gPEVay bjQuAn\" href=\"challenge.zip\">Download</a>\n\nWelcome! This page describes a bare-bones REST API for a chat backend.\nYour task is to implement this API using a backend stack of your choice.\nWe've provided [skeleton code] in a few popular languages/frameworks, but\nfeel free to build your implementation in a different way if you'd like.\n\n## Requirements\n\nYour solution should implement basic security and persistence using a\nrelational database. If you decide to use a language/framework that isn't\nlisted on this page, please document how to build and launch your server.\n\nWe very much value code quality and technical design. Think about the\nstructure of your data models and the readability of your code.\n\n## Follow-up discussion\n\nWe’ll discuss this as part of the project review. Don't worry if you don't\nhave all the answers off the top of your head. We’re very much looking for\nyour ability to reason about and work through these kinds of questions.\n\nHow well does your project scale? What if the number of users grow to 1000?\nTo 1000000? (And the conversation history grows too.)\n\nWhat if you had users around the globe? How do you keep the application\nresponsive? (Latency becomes problematic if you’re still running in just\none region. But if you have servers in Japan and servers in the US, how do\nthey coordinate?)\n\nGiven the time available, you may not be able to implement every feature,\nwrite tests, handle errors, or refactor the code to your satisfaction.\nThat's okay -- those things are great topics for discussion as well.\n\n## Skeleton code\n\nHere are some brief notes on getting up and running with the [skeleton code].\nIf you choose to work on your project on-site, we'll provide an Ubuntu VM\nwith tools and libraries pre-installed.\n\nAfter following the instructions below to run the skeleton code of your\nchoice, you can check if everything is working by running\n```\ncurl -s -d '' -XPOST http://localhost:8080/check\n```\nwhich should return `{\"health\": \"ok\"}`.\n\n### C\n\nThe C starter kit uses [Libmicrohttpd][], [SQLite][] and [json-c][]. It\ncomes with a `Makefile` that downloads and builds those dependencies\nlocally. It's been tested to work on Ubuntu Linux 18.04 and macOS 10.13\nwith GCC/Clang and Autoconf installed.\n\nTo get started,\n```\ncd c\nmake\n./challenge\n```\n\n### C# #\n\nThe C# starter kit is built on [ASP.NET Core][] and the\n[SQLite EF Core Database Provider][]. To get started, make sure you have\nthe .NET Core SDK installed on your computer and run\n```\ncd csharp\ndotnet run\n```\n\n### Go\n\nThe Go starter is built on the HTTP server from the standard library and\nthe [Go-SQLite3][] SQL driver. To get started, make sure you have Go and\na native toolchain installed and run\n```\ncd go\ngo get -u github.com/mattn/go-sqlite3\ngo run ./challenge.go\n```\n\n### Java\n\nThe Java starter kit is built on [Spring Boot][] and the\n[SQLite JDBC Driver][]. To get started, make sure you have [Maven][]\ninstalled and run\n```\ncd java\nmvn package\njava -jar ./target/challenge-0.1.0.jar\n```\n\n### NodeJS\n\nThe NodeJS starter kit uses the HTTP server from the standard library,\nand the [SQLite3 module][]. To get started, run\n```\ncd nodejs\nnpm install\nnode ./challenge.js\n```\n\n### Python\n\nThe Python starter kit is built on Python 3 and uses the built-in HTTP\nserver and SQLite database driver. To get started, run\n```\ncd python3\npython3 challenge.py\n```\n\n[Libmicrohttpd]: https://www.gnu.org/software/libmicrohttpd/\n[SQLite]: https://www.sqlite.org/\n[json-c]: https://github.com/json-c/json-c\n[ASP.NET Core]: https://docs.microsoft.com/en-us/aspnet/core\n[SQLite EF Core Database Provider]: https://docs.microsoft.com/en-us/ef/core/providers/sqlite/\n[Spring Boot]: https://spring.io/projects/spring-boot\n[SQLite JDBC Driver]: https://github.com/xerial/sqlite-jdbc\n[Maven]: https://maven.apache.org/\n[SQLite3 module]: https://github.com/mapbox/node-sqlite3\n[skeleton code]: challenge.zip\n\n# Authentication\n\n<!-- ReDoc-Inject: <security-definitions> -->"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080"
+    }
+  ],
+  "paths": {
+    "/check": {
+      "post": {
+        "operationId": "check",
+        "description": "Check the health of the system.\n\nThis endpoint is already implemented in the sample code.\n",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "required": [
+                    "health"
+                  ],
+                  "properties": {
+                    "health": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users": {
+      "post": {
+        "operationId": "createUser",
+        "description": "Create a user in the system.\n",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "required": [
+                    "id"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "User ID of the newly created user.\n"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/login": {
+      "post": {
+        "operationId": "login",
+        "description": "Log in as an existing user.\n",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "required": [
+                    "id",
+                    "token"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "User ID of the user who logged in.\n"
+                    },
+                    "token": {
+                      "type": "string",
+                      "description": "Authentication token to use for API calls on behalf of\nthis user.\n"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/messages": {
+      "post": {
+        "operationId": "sendMessage",
+        "description": "Send a message from one user to another. We support three types of\nmessages `text`, `image` and `video` (the latter two types include\nmetadata). A real-world server would fetch the image/video URL to\nextract the metadata, but for our purposes it's enough to hardcode\nthose metadata fields - we're more interested in how you decide to\npersist those fields.\n",
+        "security": [
+          {
+            "token": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "sender",
+                  "recipient",
+                  "content"
+                ],
+                "properties": {
+                  "sender": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "User ID of sender.\n"
+                  },
+                  "recipient": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "User ID of recipient.\n"
+                  },
+                  "content": {
+                    "$ref": "#/components/schemas/Content"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "required": [
+                    "id",
+                    "timestamp"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "Message IDs are required to be unique and increase over\ntime; they may or may not be sequential.\n"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Timestamp for this message, as recorded on the server.\n"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getMessages",
+        "description": "Fetch all existing messages to a given recipient, within a range of\nmessage IDs.\n",
+        "security": [
+          {
+            "token": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "recipient",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "User ID of recipient.\n"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "Starting message ID. Messages will be returned in increasing\norder of message ID, starting from this value (or the next lowest\nvalue stored in the database).\n"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "description": "Limit the response to this many messages.\n"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "required": [
+                    "messages"
+                  ],
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Message"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "token": {
+        "type": "http",
+        "description": "Obtain a token from the login endpoint, then pass it into the other\nendpoints as an `Authorization` header.\n",
+        "in": "header",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Message": {
+        "required": [
+          "id",
+          "timestamp",
+          "sender",
+          "recipient",
+          "content"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Message IDs are required to be unique and increase over time; they\nmay or may not be sequential.\n"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "UTC Timestamp at which server received this message.\n"
+          },
+          "sender": {
+            "type": "integer",
+            "format": "int64",
+            "description": "User ID of message sender.\n"
+          },
+          "recipient": {
+            "type": "integer",
+            "format": "int64",
+            "description": "User ID of message recipient.\n"
+          },
+          "content": {
+            "$ref": "#/components/schemas/Content"
+          }
+        }
+      },
+      "Content": {
+        "description": "Message content (one of three possible types).\n",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          }
+        },
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text": "#/components/schemas/Text",
+            "image": "#/components/schemas/Image",
+            "video": "#/components/schemas/Video"
+          }
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Text"
+          },
+          {
+            "$ref": "#/components/schemas/Image"
+          },
+          {
+            "$ref": "#/components/schemas/Video"
+          }
+        ]
+      },
+      "Text": {
+        "required": [
+          "type",
+          "text"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "Image": {
+        "required": [
+          "type",
+          "url",
+          "height",
+          "width"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "width": {
+            "type": "integer"
+          }
+        }
+      },
+      "Video": {
+        "required": [
+          "type",
+          "url",
+          "source"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "youtube",
+              "vimeo"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
